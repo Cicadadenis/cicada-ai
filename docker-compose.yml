@@ -1,0 +1,76 @@
+# AI-CICADA Docker Compose
+# Run: docker-compose up -d
+
+version: '3.8'
+
+services:
+  # Ollama - AI backend
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-cicada-ollama
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "11434:11434"
+    environment:
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_HOST=0.0.0.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # AI-CICADA Web Interface
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ai-cicada-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_PATH=/data/cicada.db
+      - OLLAMA_HOST=http://ollama:11434
+      - AI_MODEL=${AI_MODEL:-qwen2.5-coder:3b}
+      - JWT_SECRET=${JWT_SECRET:-}
+    volumes:
+      - cicada-data:/data
+    depends_on:
+      ollama:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - ai-cicada-network
+
+  # Optional: Nginx reverse proxy with SSL
+  nginx:
+    image: nginx:alpine
+    container_name: ai-cicada-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+    restart: unless-stopped
+    networks:
+      - ai-cicada-network
+    profiles:
+      - nginx
+
+volumes:
+  ollama-data:
+    driver: local
+  cicada-data:
+    driver: local
+
+networks:
+  ai-cicada-network:
+    driver: bridge
